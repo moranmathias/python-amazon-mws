@@ -9,12 +9,18 @@ import urllib
 import hashlib
 import hmac
 import base64
-import utils
+from .utils import xml2dict
 import re
 try:
     from xml.etree.ElementTree import ParseError as XMLError
 except ImportError:
     from xml.parsers.expat import ExpatError as XMLError
+
+try:
+    from urllib import quote
+except ImportError:
+    from urllib.parse import quote
+
 from time import strftime, gmtime
 
 from requests import request
@@ -46,7 +52,7 @@ MARKETPLACES = {
     "UK" : "https://mws-eu.amazonservices.com", #A1F83G8C2ARO7P
     "JP" : "https://mws.amazonservices.jp", #A1VC38T7YXB528
     "CN" : "https://mws.amazonservices.com.cn", #AAHKV2X7AFYLW
-    "MX" : "https://mws.amazonservices.com.mx", #A1AM78C64UM0Y8    
+    "MX" : "https://mws.amazonservices.com.mx", #A1AM78C64UM0Y8
 }
 
 
@@ -80,14 +86,14 @@ def remove_empty(d):
 
 def remove_namespace(xml):
     regex = re.compile(' xmlns(:ns2)?="[^"]+"|(ns2:)|(xml:)')
-    return regex.sub('', xml)
+    return regex.sub('', str(xml))
 
 
 class DictWrapper(object):
     def __init__(self, xml, rootkey=None):
         self.original = xml
         self._rootkey = rootkey
-        self._mydict = utils.xml2dict().fromstring(remove_namespace(xml))
+        self._mydict = xml2dict().fromstring(remove_namespace(xml))
         self._response_dict = self._mydict.get(self._mydict.keys()[0],
                                                self._mydict)
 
@@ -180,9 +186,9 @@ class MWS(object):
         if self.auth_token:
             params['MWSAuthToken'] = self.auth_token
         params.update(extra_data)
-        request_description = '&'.join(['%s=%s' % (k, urllib.quote(params[k], safe='-_.~').encode('utf-8')) for k in sorted(params)])
+        request_description = '&'.join(['%s=%s' % (k, quote(params[k], safe='-_.~')) for k in sorted(params)])
         signature = self.calc_signature(method, request_description)
-        url = '%s%s?%s&Signature=%s' % (self.domain, self.uri, request_description, urllib.quote(signature))
+        url = '%s%s?%s&Signature=%s' % (self.domain, self.uri, request_description, quote(signature))
         headers = {'User-Agent': 'python-amazon-mws/0.0.1 (Language=Python)'}
         headers.update(kwargs.get('extra_headers', {}))
 
@@ -200,12 +206,12 @@ class MWS(object):
 
             # I do not check the headers to decide which content structure to server simply because sometimes
             # Amazon's MWS API returns XML error responses with "text/plain" as the Content-Type.
-            try:
-                parsed_response = DictWrapper(data, extra_data.get("Action") + "Result")
-            except XMLError:
-                parsed_response = DataWrapper(data, response.headers)
+            # try:
+            # parsed_response = DictWrapper(data, extra_data.get("Action") + "Result")
+            # except XMLError:
+            parsed_response = DataWrapper(data, response.headers)
 
-        except HTTPError, e:
+        except HTTPError as e:
             error = MWSError(str(e.response.text))
             error.response = e.response
             raise error
@@ -226,7 +232,7 @@ class MWS(object):
         """Calculate MWS signature to interface with Amazon
         """
         sig_data = method + '\n' + self.domain.replace('https://', '').lower() + '\n' + self.uri + '\n' + request_description
-        return base64.b64encode(hmac.new(str(self.secret_key), sig_data, hashlib.sha256).digest())
+        return base64.b64encode(hmac.new(self.secret_key.encode(), sig_data.encode(), hashlib.sha256).digest())
 
     def get_timestamp(self):
         """
